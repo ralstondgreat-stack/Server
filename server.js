@@ -26,7 +26,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&u.pathname==='/health') return send(res,200,{ok:true,service:'ParentGuard relay'});
     if(req.method==='POST'&&u.pathname==='/v1/pair/start'){
       const b=await read(req); const deviceId=crypto.randomUUID(); const deviceToken=token(); const pairingCode=code();
-      devices.set(deviceId,{id:deviceId,token:deviceToken,created:now(),lastSeen:0,snapshot:{status:'Waiting for first sync'},frame:null,request:null,sharing:false,messages:[]});
+      devices.set(deviceId,{id:deviceId,token:deviceToken,created:now(),lastSeen:0,snapshot:{status:'Waiting for first sync'},frame:null,request:null,sharing:false,messages:[],commands:[],timeRequest:null});
       pairCodes.set(pairingCode,{deviceId,expires:now()+5*60*1000});
       return send(res,200,{deviceId,deviceToken,pairingCode,expiresInSeconds:300});
     }
@@ -45,6 +45,30 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&u.pathname==='/v1/snapshot'){
       const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
       return send(res,200,{deviceId:d.id,online:now()-d.lastSeen<60000,lastSeen:d.lastSeen,snapshot:d.snapshot,sharing:d.sharing,request:d.request?{id:d.request.id,expires:d.request.expires}:null});
+    }
+    if(req.method==='POST'&&u.pathname==='/v1/control'){
+      const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
+      const b=await read(req); const type=String(b.type||''); if(!['lock','unlock','setLimit','grantTime'].includes(type))return send(res,400,{error:'Invalid control type'});
+      const minutes=(type==='setLimit' && Number(b.minutes)===0)?0:Math.max(1,Math.min(720,Math.floor(Number(b.minutes)||15)));
+      if(type==='setLimit' && (!Number.isFinite(Number(b.minutes)) || Number(b.minutes)<0 || Number(b.minutes)>720))return send(res,400,{error:'Limit must be between 0 and 720 minutes'});
+      const cmd={id:token(),type,minutes,created:now()}; d.commands=d.commands||[]; d.commands.push(cmd); if(d.commands.length>20)d.commands=d.commands.slice(-20); return send(res,200,{ok:true,commandId:cmd.id});
+    }
+    if(req.method==='GET'&&u.pathname==='/v1/control'){
+      const d=getDevice(req); if(!d)return send(res,401,{error:'Invalid device token'}); return send(res,200,{commands:(d.commands||[]).slice(0,10)});
+    }
+    if(req.method==='POST'&&u.pathname==='/v1/control/ack'){
+      const d=getDevice(req); if(!d)return send(res,401,{error:'Invalid device token'}); const b=await read(req); d.commands=(d.commands||[]).filter(x=>x.id!==String(b.id||'')); return send(res,200,{ok:true});
+    }
+    if(req.method==='POST'&&u.pathname==='/v1/time-request'){
+      const d=getDevice(req); if(!d)return send(res,401,{error:'Invalid device token'}); const b=await read(req); const minutes=Math.max(5,Math.min(120,Math.floor(Number(b.minutes)||15)));
+      d.timeRequest={id:token(),minutes,created:now(),status:'pending'}; return send(res,200,{ok:true,id:d.timeRequest.id});
+    }
+    if(req.method==='GET'&&u.pathname==='/v1/time-request'){
+      const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'}); return send(res,200,{request:d.timeRequest});
+    }
+    if(req.method==='POST'&&u.pathname==='/v1/time-request/respond'){
+      const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'}); const b=await read(req); if(!d.timeRequest||d.timeRequest.id!==String(b.id||''))return send(res,409,{error:'Time request expired or already handled'});
+      const reqMinutes=d.timeRequest.minutes; const approve=!!b.approve; d.timeRequest={...d.timeRequest,status:approve?'approved':'declined',handledAt:now()}; if(approve){d.commands=d.commands||[];d.commands.push({id:token(),type:'grantTime',minutes:Math.max(1,Math.min(120,Math.floor(Number(b.minutes)||reqMinutes))),created:now()});} return send(res,200,{ok:true,status:d.timeRequest.status});
     }
     if(req.method==='POST'&&u.pathname==='/v1/message'){
       const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
