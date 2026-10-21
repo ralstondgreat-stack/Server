@@ -26,7 +26,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&u.pathname==='/health') return send(res,200,{ok:true,service:'ParentGuard relay'});
     if(req.method==='POST'&&u.pathname==='/v1/pair/start'){
       const b=await read(req); const deviceId=crypto.randomUUID(); const deviceToken=token(); const pairingCode=code();
-      devices.set(deviceId,{id:deviceId,token:deviceToken,created:now(),lastSeen:0,snapshot:{status:'Waiting for first sync'},frame:null,request:null,sharing:false});
+      devices.set(deviceId,{id:deviceId,token:deviceToken,created:now(),lastSeen:0,snapshot:{status:'Waiting for first sync'},frame:null,request:null,sharing:false,messages:[]});
       pairCodes.set(pairingCode,{deviceId,expires:now()+5*60*1000});
       return send(res,200,{deviceId,deviceToken,pairingCode,expiresInSeconds:300});
     }
@@ -45,6 +45,18 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&u.pathname==='/v1/snapshot'){
       const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
       return send(res,200,{deviceId:d.id,online:now()-d.lastSeen<60000,lastSeen:d.lastSeen,snapshot:d.snapshot,sharing:d.sharing,request:d.request?{id:d.request.id,expires:d.request.expires}:null});
+    }
+    if(req.method==='POST'&&u.pathname==='/v1/message'){
+      const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
+      const b=await read(req); const message=String(b.message||'').trim(); if(!message)return send(res,400,{error:'Message cannot be empty'}); if(message.length>500)return send(res,413,{error:'Message must be 500 characters or fewer'});
+      const item={id:token(),text:message,created:now()}; d.messages=d.messages||[]; d.messages.push(item); if(d.messages.length>20)d.messages=d.messages.slice(-20);
+      return send(res,200,{ok:true,messageId:item.id});
+    }
+    if(req.method==='GET'&&u.pathname==='/v1/message'){
+      const d=getDevice(req); if(!d)return send(res,401,{error:'Invalid device token'}); const item=(d.messages||[])[0]||null; return send(res,200,{message:item});
+    }
+    if(req.method==='POST'&&u.pathname==='/v1/message/ack'){
+      const d=getDevice(req); if(!d)return send(res,401,{error:'Invalid device token'}); const b=await read(req); d.messages=(d.messages||[]).filter(m=>m.id!==String(b.id||'')); return send(res,200,{ok:true});
     }
     if(req.method==='POST'&&u.pathname==='/v1/screen/request'){
       const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
