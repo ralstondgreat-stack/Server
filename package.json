@@ -1,0 +1,8 @@
+{
+  "name": "parentguard-remote-relay",
+  "version": "2.0.0",
+  "private": true,
+  "description": "HTTPS relay API for ParentGuard remote pairing, dashboard and consent-based screen sharing",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
