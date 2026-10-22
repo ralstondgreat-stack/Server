@@ -48,7 +48,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(req.method==='POST'&&u.pathname==='/v1/control'){
       const p=getParent(req); if(!p)return send(res,401,{error:'Invalid parent token'}); const d=devices.get(p.deviceId); if(!d)return send(res,404,{error:'Device not found'});
-      const b=await read(req); const action=String(b.action||''); if(!['lock','set_limit','approve_time','deny_time'].includes(action))return send(res,400,{error:'Unsupported control action'});
+      const b=await read(req); const action=String(b.action||''); if(!['lock','unlock','set_limit'].includes(action))return send(res,400,{error:'Unsupported control action'});
       d.control={id:token(),action,minutes:Math.max(0,Math.min(720,Number(b.minutes)||0)),created:now()}; return send(res,200,{ok:true,action:d.control.action});
     }
     if(req.method==='GET'&&u.pathname==='/v1/control'){
